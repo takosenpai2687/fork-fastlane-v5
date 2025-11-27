@@ -5,8 +5,13 @@
 <head>
   <link rel="stylesheet" href="{{stylesheetPath}}" />
 
-  {{&prerequisiteScripts}}
-  <script src="{{initScriptPath}}" defer></script>
+  <script src="{{initScriptPath}}"></script>
+  <script src="fastlaneSdkComponent.js"></script>
+  <script
+    async
+    onload="onPayPalWebSdkLoaded()"
+    src="https://www.sandbox.paypal.com/web-sdk/v6/core"
+  ></script>
 </head>
 
 <body>

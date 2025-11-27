@@ -35,7 +35,7 @@ function getAuthAssertionToken(clientId, merchantId) {
   return authAssertion;
 }
 
-async function getClientToken() {
+async function getBrowserSafeClientToken() {
   try {
     if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
       throw new Error('Missing API credentials');
@@ -62,8 +62,9 @@ async function getClientToken() {
     const searchParams = new URLSearchParams();
     searchParams.append('grant_type', 'client_credentials');
     searchParams.append('response_type', 'client_token');
-    searchParams.append('intent', 'sdk_init');
-    searchParams.append('domains[]', DOMAINS);
+    if (DOMAINS) {
+      searchParams.append('domains[]', DOMAINS);
+    }
 
     const options = {
       method: 'POST',
@@ -74,10 +75,24 @@ async function getClientToken() {
     const response = await fetch(url, options);
     const data = await response.json();
 
-    return data.access_token;
+    return {
+      accessToken: data.access_token,
+      expiresIn: Number(data.expires_in),
+      tokenType: data.token_type,
+    };
   } catch (error) {
     console.error(error);
+    throw error;
+  }
+}
 
+// Keep this for backward compatibility
+async function getClientToken() {
+  try {
+    const result = await getBrowserSafeClientToken();
+    return result.accessToken;
+  } catch (error) {
+    console.error(error);
     return '';
   }
 }
@@ -123,14 +138,7 @@ async function getAccessToken() {
  * ###################################################################### */
 
 function getPayPalSdkUrl() {
-  const sdkUrl = new URL('/sdk/js', PAYPAL_SDK_BASE_URL);
-  const sdkParams = new URLSearchParams({
-    'client-id': PAYPAL_CLIENT_ID,
-    components: 'buttons,fastlane',
-  });
-  sdkUrl.search = sdkParams.toString();
-
-  return sdkUrl.toString();
+  return `${PAYPAL_SDK_BASE_URL}/web-sdk/v6/core`;
 }
 
 async function renderCheckout(req, res) {
@@ -165,6 +173,12 @@ async function renderCheckout(req, res) {
 async function createOrder(req, res) {
   try {
     const { paymentToken, shippingAddress } = req.body;
+    let singleUseToken = paymentToken;
+
+    // Handle both v5 and v6 formats
+    if (paymentToken && typeof paymentToken === 'object' && paymentToken.id) {
+      singleUseToken = paymentToken.id;
+    }
 
     const url = `${PAYPAL_API_BASE_URL}/v2/checkout/orders`;
 
@@ -180,7 +194,7 @@ async function createOrder(req, res) {
       intent: 'CAPTURE',
       payment_source: {
         card: {
-          single_use_token: paymentToken.id,
+          single_use_token: singleUseToken,
         },
       },
       purchase_units: [
@@ -226,7 +240,7 @@ async function createOrder(req, res) {
     });
     const result = await response.json();
 
-    res.status(response.status).json({ result });
+    res.status(response.status).json(result);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message });
@@ -249,6 +263,7 @@ function configureServer(app) {
 
   app.get('/', renderCheckout);
   app.post('/transaction', createOrder);
+  app.post('/paypal-api/checkout/orders/create', createOrder);
 
   app.get('/sdk/url', (_req, res) => {
     const sdkUrl = getPayPalSdkUrl();
@@ -258,6 +273,16 @@ function configureServer(app) {
   app.get('/sdk/client-token', async (_req, res) => {
     const clientToken = await getClientToken();
     res.json({ clientToken });
+  });
+
+  app.get('/paypal-api/auth/browser-safe-client-token', async (_req, res) => {
+    try {
+      const jsonResponse = await getBrowserSafeClientToken();
+      res.status(200).json(jsonResponse);
+    } catch (error) {
+      console.error('Failed to create browser safe access token:', error);
+      res.status(500).json({ error: 'Failed to create browser safe access token.' });
+    }
   });
 
   app.use(express.static('../../client/html/src'));

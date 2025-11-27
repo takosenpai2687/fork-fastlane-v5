@@ -1,19 +1,29 @@
-async function initFastlane() {
+async function initFastlane(sdkInstance) {
   try {
     /* ######################################################################
      * Initialize Fastlane components
      * ###################################################################### */
 
-    if (!window.paypal.Fastlane) {
-      throw new Error('PayPal script loaded but no Fastlane module');
+    const fastlane = await sdkInstance.createFastlane();
+
+    console.log({ fastlane });
+    if (!fastlane) {
+      throw new Error(
+        'PayPal fastlane instance not initialized. Make sure the SDK is loaded properly.',
+      );
     }
 
-    const {
-      identity,
-      profile,
-      FastlanePaymentComponent,
-      FastlaneWatermarkComponent,
-    } = await window.paypal.Fastlane({
+    // Set fastlane locale if needed
+    fastlane.setLocale('en_us');
+
+    const FastlaneWatermarkComponent =
+      await fastlane.FastlaneWatermarkComponent({
+        includeAdditionalInfo: true,
+      });
+
+    const { identity, profile } = fastlane;
+
+    const paymentComponent = await fastlane.FastlanePaymentComponent({
       // shippingAddressOptions: {
       //   allowedLocations: [],
       // },
@@ -41,13 +51,7 @@ async function initFastlane() {
       },
     });
 
-    const paymentComponent = await FastlanePaymentComponent();
-
-    (
-      await FastlaneWatermarkComponent({
-        includeAdditionalInfo: true,
-      })
-    ).render('#watermark-container');
+    await FastlaneWatermarkComponent.render('#watermark-container');
 
     /* ######################################################################
      * State & data required for Fastlane
@@ -334,15 +338,15 @@ async function initFastlane() {
           ...(isShippingRequired && { shippingAddress }),
           paymentToken,
         });
-        const response = await fetch('transaction', {
+        const response = await fetch('/paypal-api/checkout/orders/create', {
           method: 'POST',
           headers,
           body,
         });
-        const { result, error } = await response.json();
+        const result = await response.json();
 
-        if (error) {
-          console.error(error);
+        if (result.error) {
+          console.error(result.error);
         } else {
           if (result.id) {
             const message = `Order ${result.id}: ${result.status}`;
@@ -361,5 +365,3 @@ async function initFastlane() {
     console.error(error);
   }
 }
-
-initFastlane();
